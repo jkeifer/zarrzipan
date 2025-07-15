@@ -1,0 +1,40 @@
+name: "Continuous integration"
+
+concurrency:
+  group: ${{ github.ref }}
+  cancel-in-progress: false
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+jobs:
+  ci:
+    name: Continuous integration
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version:
+          - "3.12"
+          - "3.13"
+          - "3.14"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Sync
+        run: uv sync
+      - name: Pre-Commit Hooks
+        run: uv run pre-commit run --all-files
+      - name: Test
+        run: uv run pytest
+      - name: "Upload coverage to Codecov"
+        uses: codecov/codecov-action@v4
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+        with:
+          fail_ci_if_error: false
+          verbose: true

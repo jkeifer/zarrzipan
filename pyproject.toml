@@ -1,0 +1,98 @@
+[project]
+name = "zarrzipan"
+description = "A zarr-based compression benchmarking tool"
+authors = [
+    {name = "Jarrett Keifer", email = "jkeifer0@gmail.com"},
+]
+requires-python = ">=3.14"
+license = {text = "Apache License 2.0"}
+dependencies = [
+    "numcodecs>=0.16.0",
+    "numpy>=2.2.5",
+    "zarr>=3.0.7",
+]
+dynamic = [
+    'version',
+]
+
+[project.urls]
+Repository = 'https://github.com/jkeifer/zarrzipan'
+
+[build-system]
+requires = [
+    "hatchling",
+    "hatch-vcs",
+]
+build-backend = "hatchling.build"
+
+[tool.hatch.version]
+source = "vcs"
+
+[tool.hatch.build.hooks.vcs]
+version-file = "src/zarrzipan/__version__.py"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/zarrzipan"]
+
+[tool.ruff.format]
+quote-style = 'single'
+
+[tool.ruff.lint]
+# https://docs.astral.sh/ruff/rules/
+select = [
+    'B',
+    'BLE',
+    'C4',
+    'C90',
+    'COM',
+    'DTZ',
+    'E',
+    'ERA',
+    'F',
+    'FA',
+    'G',
+    'I',
+    'INP',
+    'N',
+    'NPY',
+    'PT',
+    'PTH',
+    'RET',
+    'RUF',
+    'S',
+    'SIM',
+    'T20',
+    'UP',
+    'W',
+
+]
+
+[tool.ruff.lint.per-file-ignores]
+'__init__.py' = ['E402']
+'tests/**/*' = ['T201', 'S101']
+
+[tool.ruff.lint.isort]
+lines-between-types = 1
+
+[tool.mypy]
+ignore_missing_imports = true
+scripts_are_modules = true
+
+[tool.pytest.ini_options]
+addopts="--cov=zarrzipan"
+
+[tool.coverage.report]
+show_missing = true
+skip_empty = true
+sort = "Cover"
+
+[dependency-groups]
+dev = [
+    "mypy>=1.15.0",
+    "pre-commit>=4.2.0",
+    "pre-commit-hooks>=5.0.0",
+    "pytest>=8.3.5",
+    "pytest-cov>=6.1.1",
+    "pytest-coverage>=0.0",
+    "ruff>=0.11.6",
+]
