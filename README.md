@@ -1,6 +1,12 @@
 # Zarrzipan: A raster compression benchmarking tool
 
-Zarrzipan is a compression benchmarking tool based on Zarr.
+Zarrzipan is a compression benchmarking tool based on Zarr. It features a
+python API for declaratively describing numpy arrays and zarr compression
+pipelines to be benchmarked.
+
+Note that this is experimental software written with significant LLM
+assistance. Some metrics such as memory usage and timing may not be accurately
+measured.
 
 ## Usage
 
