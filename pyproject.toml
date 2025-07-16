@@ -4,7 +4,7 @@ description = "A zarr-based compression benchmarking tool"
 authors = [
     {name = "Jarrett Keifer", email = "jkeifer0@gmail.com"},
 ]
-requires-python = ">=3.14"
+requires-python = ">=3.12"
 license = {text = "Apache License 2.0"}
 dependencies = [
     "numcodecs>=0.16.0",
