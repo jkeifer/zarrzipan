@@ -1,6 +1,7 @@
 [project]
 name = "zarrzipan"
 description = "A zarr-based compression benchmarking tool"
+readme = "README.md"
 authors = [
     {name = "Jarrett Keifer", email = "jkeifer0@gmail.com"},
 ]
