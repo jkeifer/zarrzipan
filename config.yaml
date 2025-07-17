@@ -1,0 +1,40 @@
+arrays:
+  - name: 'Single band COG'
+    href: 'https://e84-earth-search-sentinel-data.s3.us-west-2.amazonaws.com/sentinel-2-c1-l2a/10/T/FR/2023/12/S2B_T10TFR_20231223T190950_L2A/B04.tif'
+    slice:
+      x: [0, 2048]
+      y: [0, 2048]
+
+codec-pipelines:
+  - name: 'Zlib level 5'
+    steps:
+      - name: 'bytes'
+        configuration:
+          endian: 'little'
+      - name: 'numcodecs.zlib'
+        configuration:
+          level: 5
+  - name: 'Blosc (defaults)'
+    steps:
+      - name: 'bytes'
+        configuration:
+          endian: 'little'
+      - name: 'blosc'
+        configuration:
+          cname: 'lz4'
+          clevel: 5
+          shuffle: 'shuffle'
+
+jobs:
+  # maybe this is a matrix per array where you define
+  # the codecs, chunk sizes, and iterations to be combined
+  - array-name: 'Single band COG'
+    codec-pipelines:
+      - 'Zlib level 5'
+      - 'Blosc (defaults)'
+    # optional to use whole array in one go
+    chunk-shapes:
+      - [2048, 2048]
+      - [1024, 1024]
+    # number of times to run compression/decompression, default 1
+    iterations: 3
