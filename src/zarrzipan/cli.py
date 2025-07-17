@@ -5,7 +5,7 @@ import warnings
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, TypedDict
 from urllib.parse import urlsplit
 
 import click
@@ -16,6 +16,7 @@ import yaml
 
 from obstore.store import HTTPStore
 from rich.console import Console
+from rich.progress import track
 from rich.table import Table
 from rich.text import Text
 
@@ -28,42 +29,83 @@ DATA_DIR = Path('data')
 OUTPUT_DIR = Path('output')
 
 
+class ArrayDict(TypedDict):
+    name: str
+    href: str
+    slice: dict[str, list[int]] | None
+
+
+class CodecPipelineDict(TypedDict):
+    name: str
+    steps: list[dict[str, Any]]
+
+
+JobDict = TypedDict(
+    'JobDict',
+    {
+        'array': str,
+        'pipelines': list[str],
+        'chunk-shapes': list[list[int] | None],
+        'iterations': int,
+    },
+)
+
+
+class ConfigDict(TypedDict):
+    arrays: list[ArrayDict]
+    pipelines: list[CodecPipelineDict]
+    jobs: list[JobDict]
+
+
+@dataclass(frozen=True)
+class Job:
+    array: ArrayDict
+    pipelines: list[CodecPipelineDict]
+    chunk_shapes: list[list[int] | None]
+    iterations: int
+
+    @classmethod
+    def from_config(
+        cls,
+        arrays: dict[str, ArrayDict],
+        pipelines: dict[str, CodecPipelineDict],
+        job: JobDict,
+    ) -> 'Job':
+        return cls(
+            array=arrays[job['array']],
+            pipelines=[pipelines[p] for p in job['pipelines']],
+            chunk_shapes=job.get('chunk-shapes', [None]),
+            iterations=job.get('iterations', 1),
+        )
+
+
 @dataclass(frozen=True)
 class Config:
     """
     A container for all the config information from the config file.
     """
 
-    arrays: dict[str, dict[str, str | tuple[int, int]]]
-    codec_pipelines: dict[str, list[dict[str, any]]]
-    jobs: list[dict[str, Any]]
+    jobs: list[Job]
 
     @classmethod
-    def from_dict(cls, config) -> 'Config':
-        arrays = {}
-        for array in config['arrays']:
-            arrays[array['name']] = {'href': array['href'], 'slice': array.get('slice')}
-        codec_pipelines = {}
-        for pipeline in config['codec-pipelines']:
-            codec_pipelines[pipeline['name']] = pipeline['steps']
+    def from_dict(cls, config: ConfigDict) -> 'Config':
+        arrays = {array['name']: array for array in config['arrays']}
+        pipelines = {pipeline['name']: pipeline for pipeline in config['pipelines']}
 
-        return cls(arrays=arrays, codec_pipelines=codec_pipelines, jobs=config['jobs'])
+        jobs = [Job.from_config(arrays, pipelines, job) for job in config['jobs']]
 
-
-def _parse_config(config_file):
-    with open(config_file) as f:
-        data = yaml.safe_load(f.read())
-
-    config = Config.from_dict(data)
-    return config
+        return cls(jobs=jobs)
 
 
 def _get_output_filepath():
-    output_files_n = 0
+    """
+    Given a directory of files with the same naming style
+    (output1.json, output2.json, ...) figure out the next filename
+    """
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     pattern = re.compile(r'output(\d+)\.json')
 
-    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-
+    output_files_n = 0
     for f in OUTPUT_DIR.iterdir():
         match = pattern.match(f.name)
         if match:
@@ -73,12 +115,13 @@ def _get_output_filepath():
                 if n > output_files_n:
                     output_files_n = n
             except ValueError:
-                # This handles cases where the extracted group might not be a valid integer
+                # For when the extracted group might not be a valid integer
                 continue
+
     return OUTPUT_DIR / f'output{output_files_n + 1}.json'
 
 
-def _fetch_array(name: str, href: str):
+def _fetch_array(name: str, href: str) -> Path:
     parts = urlsplit(href)
     filename = parts.path.split('/')[-1]
 
@@ -92,40 +135,15 @@ def _fetch_array(name: str, href: str):
         store = HTTPStore(f'{parts.scheme}://{parts.netloc}')
         resp = obs.get(store, parts.path)
 
-        with open(filepath, 'wb') as f:
+        with Path(filepath).open('wb') as f:
             for chunk in resp:
                 f.write(chunk)
 
     return filepath
 
 
-def _load_output(output_file):
-    # 0. Load the data
-    with open(output_file) as f:
-        ndjson_data = f.read()
-
-    # 1. Clean and prepare the ndjson_data string.
-    #    Remove empty lines and leading/trailing whitespace from each line, then join.
-    cleaned_data_lines = [
-        line.strip() for line in ndjson_data.splitlines() if line.strip()
-    ]
-    continuous_json_string = ''.join(cleaned_data_lines)
-
-    # 2. Replace 'NaN' with 'null' in the entire string to make it JSON compliant.
-    json_compliant_string = continuous_json_string.replace('NaN', 'null')
-
-    # 3. Replace the '}{' pattern with '},{' to create a comma-separated list of JSON objects.
-    #    This handles cases where JSON objects are directly concatenated without a comma.
-    array_elements_string = json_compliant_string.replace('}{', '},{')
-
-    # 4. Wrap the modified string with '[' and ']' to form a valid JSON array string.
-    final_json_array_string = f'[{array_elements_string}]'
-
-    # 5. Parse the resulting string using json.loads().
-    return json.loads(final_json_array_string)
-
-
-def _create_table(results):
+def _create_table(results: list[dict[str, Any]]) -> Table:
+    """Create a rich table matching the markdown table"""
     # Define the desired column order and their corresponding keys in the JSON data
     desired_columns = [
         ('Dataset Name', 'dataset_name'),
@@ -141,40 +159,33 @@ def _create_table(results):
 
     mean_compression_ratio = np.mean([item['size_ratio'] for item in results])
 
+    # Helper function to format values
+    def format_value(key, value):
+        if key == 'size_ratio':
+            color = 'cyan'
+            if value > mean_compression_ratio + 1:
+                color = 'green'
+            elif value < max(mean_compression_ratio - 1, 1):
+                color = 'red'
+            return Text(f'{value:.2f}x', style=color)
+        if key == 'lossiness_mae':
+            return f'{value:.4f}'
+        if key == 'chunk_shape':
+            return str(value).replace('[', '(').replace(']', ')')
+        if isinstance(value, float):
+            return f'{value:.2f}'
+        return str(value)
+
     # Create a rich table
     table = Table(title='Compression Benchmark Results')
 
-    # Add columns to the table based on desired_columns
+    # Add columns to the table
     for header_name, _ in desired_columns:
-        table.add_column(header_name, justify='left', style='cyan', no_wrap=False)
+        table.add_column(header_name, justify='right', style='cyan', no_wrap=False)
 
     # Add rows to the table
     for data_item in results:
-        row_values = []
-        for header_name, key in desired_columns:
-            value = data_item.get(key, 'N/A')
-            if value in ("NaN", "null", 'N/A'):
-                return "-"
-
-            # Format specific values
-            if key == 'size_ratio':
-                if value > mean_compression_ratio + 1:
-                    color = 'green'
-                elif value < max(mean_compression_ratio - 1, 1):
-                    color = 'red'
-                else:
-                    color = 'cyan'
-                formatted_value = f'{value:.2f}x'
-                value = Text(formatted_value, style=color)
-            elif key == 'lossiness_mae':
-                value = f'{value:.4f}'
-            elif key == 'chunk_shape':
-                # Remove brackets and quotes if present from chunk_shape string representation
-                value = str(value).replace('[', '').replace(']', '').replace("'", '')
-            elif isinstance(value, (int, float)):
-                value = f'{value:.2f}'
-
-            row_values.append(str(value))
+        row_values = [format_value(key, data_item[key]) for _, key in desired_columns]
         table.add_row(*row_values)
 
     return table
@@ -184,7 +195,6 @@ def _create_table(results):
 @click.option('--verbose', '-v', is_flag=True, help='Print more output.')
 @click.pass_context
 def cli(ctx, verbose):
-    # ensure that ctx.obj exists and is a dict (in case `cli()` is called directly)
     ctx.ensure_object(dict)
     ctx.obj['v'] = verbose
 
@@ -192,13 +202,15 @@ def cli(ctx, verbose):
 @cli.command()
 @click.pass_context
 @click.option(
-    '--config',
+    '--config-file',
+    '-f',
     default='config.yaml',
     help='Filepath to config file',
     type=click.Path(exists=True),
 )
 @click.option(
     '--output-file',
+    '-o',
     required=False,
     help=(
         'Filepath to output into. If specified will append to an '
@@ -207,44 +219,57 @@ def cli(ctx, verbose):
     ),
     type=click.Path(dir_okay=False),
 )
-def run(ctx, config: str, output_file: str | None = None) -> None:
+@click.option(
+    '--hide',
+    '-h',
+    is_flag=True,
+    help='Do not show the table.',
+)
+def run(
+    ctx,
+    config_file: str,
+    output_file: str | None = None,
+    hide: bool = False,
+) -> None:
     """Run the jobs in the config file fetching data if needed"""
-    config = _parse_config(config)
-    results = []
+    with Path(config_file).open('r') as f:
+        data = yaml.safe_load(f.read())
+    config = Config.from_dict(data)
 
     if not output_file:
         output_file = _get_output_filepath()
 
-    for i, job in enumerate(config.jobs):
-        if ctx.obj['v']:
-            click.echo(f'Running job [{i + 1}/{len(config.jobs)}]')
+    results = []
+    for job in track(config.jobs, description='Running jobs...'):
+        local_path = _fetch_array(job.array['name'], job.array['href'])
 
-        array = config.arrays[job['array-name']]
-        local_path = _fetch_array(job['array-name'], array['href'])
+        # Open the dataset from local with xarray
         ds = xr.open_dataset(local_path, chunks=None)
 
+        # TODO: Add handling for when there is more than one variable
         if len(ds.keys()) == 1:
             data_array = next(v.squeeze() for v in ds.values())
         else:
             raise ValueError('More than one variable in dataset')
 
-        if array['slice'] is not None:
+        if job.array['slice'] is not None:
             data_array = data_array.isel(
-                **{k: slice(*v) for k, v in array['slice'].items()},
+                {k: slice(*v) for k, v in job.array['slice'].items()},
             )
+
         if ctx.obj['v']:
             click.echo(f'Array has shape: {data_array.shape}')
 
         pipelines = [
-            CodecPipeline(name=name, codec_configs=config.codec_pipelines[name])
-            for name in job['codec-pipelines']
+            CodecPipeline(name=pipeline['name'], codec_configs=pipeline['steps'])
+            for pipeline in job.pipelines
         ]
 
-        for chunk_shape in job.get('chunk-shapes', [None]):
+        for chunk_shape in job.chunk_shapes:
             dataset = BenchmarkInput(
-                name=job['array-name'],
+                name=job.array['name'],
                 array=data_array.values,
-                chunk_shape=chunk_shape,
+                chunk_shape=tuple(chunk_shape) if chunk_shape else data_array.shape,
             )
 
             if ctx.obj['v']:
@@ -256,29 +281,32 @@ def run(ctx, config: str, output_file: str | None = None) -> None:
                 run_comparison(
                     datasets=[dataset],
                     pipelines=pipelines,
-                    iterations=job['iterations'] or 1,
+                    iterations=job.iterations,
                 ),
             )
 
-            with open(output_file, 'a') as f:
-                for result in run_results.to_ndjson(indent=2):
+            with Path(output_file).open('a') as f:
+                for result in run_results.to_ndjson():
                     f.write(result)
                     f.write('\n')
 
             results.extend(run_results.to_dicts())
 
-    table = _create_table(results)
+    if not hide:
+        table = _create_table(results)
 
-    # Print the table
-    console = Console()
-    console.print(table)
+        # Print the table
+        console = Console()
+        console.print(table)
 
 
 @cli.command()
 @click.argument('output_file', type=click.Path(exists=True, dir_okay=False))
-def show(output_file) -> None:
+def show(output_file: str) -> None:
     """Show a table with all the outputs from a given file"""
-    results = _load_output(output_file)
+    with Path(output_file).open('r') as f:
+        results = [json.loads(line) for line in f.readlines()]
+
     table = _create_table(results)
 
     # Print the table
