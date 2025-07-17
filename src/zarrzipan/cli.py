@@ -88,7 +88,10 @@ class Config:
     jobs: list[Job]
 
     @classmethod
-    def from_dict(cls, config: ConfigDict) -> 'Config':
+    def from_file(cls, config_file: Path) -> 'Config':
+        with config_file.open('r') as f:
+            config = yaml.safe_load(f.read())
+
         arrays = {array['name']: array for array in config['arrays']}
         pipelines = {pipeline['name']: pipeline for pipeline in config['pipelines']}
 
@@ -97,16 +100,16 @@ class Config:
         return cls(jobs=jobs)
 
 
-def _get_output_filepath():
+def _get_output_filepath(output_dir: Path) -> Path:
     """
     Given a directory of files with the same naming style
     (output1.json, output2.json, ...) figure out the next filename
     """
-    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    output_dir.mkdir(parents=True, exist_ok=True)
     pattern = re.compile(r'output(\d+)\.json')
 
     output_files_n = 0
-    for f in OUTPUT_DIR.iterdir():
+    for f in output_dir.iterdir():
         match = pattern.match(f.name)
         if match:
             try:
@@ -118,24 +121,23 @@ def _get_output_filepath():
                 # For when the extracted group might not be a valid integer
                 continue
 
-    return OUTPUT_DIR / f'output{output_files_n + 1}.json'
+    return output_dir / f'output{output_files_n + 1}.json'
 
 
-def _fetch_array(name: str, href: str) -> Path:
+def _fetch_array(data_dir: Path, name: str, href: str) -> Path:
     parts = urlsplit(href)
     filename = parts.path.split('/')[-1]
 
-    filepath = DATA_DIR / name / filename
+    filepath = data_dir / name / filename
+    filepath.parent.mkdir(parents=True, exist_ok=True)
 
     if not filepath.exists():
         click.echo(f'Fetching {href}')
 
-        filepath.parent.mkdir(parents=True, exist_ok=True)
-
         store = HTTPStore(f'{parts.scheme}://{parts.netloc}')
         resp = obs.get(store, parts.path)
 
-        with Path(filepath).open('wb') as f:
+        with filepath.open('wb') as f:
             for chunk in resp:
                 f.write(chunk)
 
@@ -206,7 +208,13 @@ def cli(ctx, verbose):
     '-f',
     default='config.yaml',
     help='Filepath to config file',
-    type=click.Path(exists=True),
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+)
+@click.option(
+    '--data-dir',
+    default=DATA_DIR,
+    help=(f"Directory to cached data in. If not specified '{DATA_DIR}' will be used"),
+    type=click.Path(file_okay=False, path_type=Path),
 )
 @click.option(
     '--output-file',
@@ -215,9 +223,18 @@ def cli(ctx, verbose):
     help=(
         'Filepath to output into. If specified will append to an '
         'existing file. If not specified a new file will be created '
-        "within '{OUTPUT_DIR}'"
+        f"within '{OUTPUT_DIR}'"
     ),
-    type=click.Path(dir_okay=False),
+    type=click.Path(dir_okay=False, path_type=Path),
+)
+@click.option(
+    '--output-dir',
+    default=OUTPUT_DIR,
+    help=(
+        'Directory to put output into. If not specified '
+        f"'{OUTPUT_DIR}' will be used unless output-file is specified"
+    ),
+    type=click.Path(file_okay=False, path_type=Path),
 )
 @click.option(
     '--hide',
@@ -227,21 +244,22 @@ def cli(ctx, verbose):
 )
 def run(
     ctx,
-    config_file: str,
-    output_file: str | None = None,
+    config_file: Path,
+    data_dir: Path = DATA_DIR,
+    output_file: Path | None = None,
+    output_dir: Path = OUTPUT_DIR,
     hide: bool = False,
 ) -> None:
     """Run the jobs in the config file fetching data if needed"""
-    with Path(config_file).open('r') as f:
-        data = yaml.safe_load(f.read())
-    config = Config.from_dict(data)
+
+    config = Config.from_file(config_file)
 
     if not output_file:
-        output_file = _get_output_filepath()
+        output_file = _get_output_filepath(output_dir)
 
     results = []
     for job in track(config.jobs, description='Running jobs...'):
-        local_path = _fetch_array(job.array['name'], job.array['href'])
+        local_path = _fetch_array(data_dir, job.array['name'], job.array['href'])
 
         # Open the dataset from local with xarray
         ds = xr.open_dataset(local_path, chunks=None)
@@ -285,7 +303,7 @@ def run(
                 ),
             )
 
-            with Path(output_file).open('a') as f:
+            with output_file.open('a') as f:
                 for result in run_results.to_ndjson():
                     f.write(result)
                     f.write('\n')
@@ -301,10 +319,13 @@ def run(
 
 
 @cli.command()
-@click.argument('output_file', type=click.Path(exists=True, dir_okay=False))
-def show(output_file: str) -> None:
+@click.argument(
+    'output_file',
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+)
+def show(output_file: Path) -> None:
     """Show a table with all the outputs from a given file"""
-    with Path(output_file).open('r') as f:
+    with output_file.open('r') as f:
         results = [json.loads(line) for line in f.readlines()]
 
     table = _create_table(results)
