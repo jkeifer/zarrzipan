@@ -1,6 +1,6 @@
 import asyncio
 import json
-import re
+import sys
 import warnings
 
 from dataclasses import dataclass
@@ -16,7 +16,7 @@ import yaml
 
 from obstore.store import HTTPStore
 from rich.console import Console
-from rich.progress import track
+from rich.progress import Progress
 from rich.table import Table
 from rich.text import Text
 
@@ -98,30 +98,6 @@ class Config:
         jobs = [Job.from_config(arrays, pipelines, job) for job in config['jobs']]
 
         return cls(jobs=jobs)
-
-
-def _get_output_filepath(output_dir: Path) -> Path:
-    """
-    Given a directory of files with the same naming style
-    (output1.json, output2.json, ...) figure out the next filename
-    """
-    output_dir.mkdir(parents=True, exist_ok=True)
-    pattern = re.compile(r'output(\d+)\.json')
-
-    output_files_n = 0
-    for f in output_dir.iterdir():
-        match = pattern.match(f.name)
-        if match:
-            try:
-                # Extract the number and convert it to an integer
-                n = int(match.group(1))
-                if n > output_files_n:
-                    output_files_n = n
-            except ValueError:
-                # For when the extracted group might not be a valid integer
-                continue
-
-    return output_dir / f'output{output_files_n + 1}.json'
 
 
 def _fetch_array(data_dir: Path, name: str, href: str) -> Path:
@@ -206,7 +182,7 @@ def cli(ctx, verbose):
 @click.option(
     '--config-file',
     '-f',
-    default='config.yaml',
+    default='zarrzipan.yaml',
     help='Filepath to config file',
     type=click.Path(exists=True, dir_okay=False, path_type=Path),
 )
@@ -216,117 +192,85 @@ def cli(ctx, verbose):
     help=(f"Directory to cached data in. If not specified '{DATA_DIR}' will be used"),
     type=click.Path(file_okay=False, path_type=Path),
 )
-@click.option(
-    '--output-file',
-    '-o',
-    required=False,
-    help=(
-        'Filepath to output into. If specified will append to an '
-        'existing file. If not specified a new file will be created '
-        f"within '{OUTPUT_DIR}'"
-    ),
-    type=click.Path(dir_okay=False, path_type=Path),
-)
-@click.option(
-    '--output-dir',
-    default=OUTPUT_DIR,
-    help=(
-        'Directory to put output into. If not specified '
-        f"'{OUTPUT_DIR}' will be used unless output-file is specified"
-    ),
-    type=click.Path(file_okay=False, path_type=Path),
-)
-@click.option(
-    '--hide',
-    '-h',
-    is_flag=True,
-    help='Do not show the table.',
-)
 def run(
     ctx,
     config_file: Path,
     data_dir: Path = DATA_DIR,
-    output_file: Path | None = None,
-    output_dir: Path = OUTPUT_DIR,
-    hide: bool = False,
 ) -> None:
     """Run the jobs in the config file fetching data if needed"""
 
     config = Config.from_file(config_file)
 
-    if not output_file:
-        output_file = _get_output_filepath(output_dir)
-
     results = []
-    for job in track(config.jobs, description='Running jobs...'):
-        local_path = _fetch_array(data_dir, job.array['name'], job.array['href'])
 
-        # Open the dataset from local with xarray
-        ds = xr.open_dataset(local_path, chunks=None)
+    with Progress(console=Console(file=sys.stderr)) as progress:
+        task = progress.add_task(
+            'Running pipelines..',
+            total=sum(len(j.chunk_shapes) * len(j.pipelines) for j in config.jobs),
+        )
+        for job in config.jobs:
+            local_path = _fetch_array(data_dir, job.array['name'], job.array['href'])
 
-        # TODO: Add handling for when there is more than one variable
-        if len(ds.keys()) == 1:
-            data_array = next(v.squeeze() for v in ds.values())
-        else:
-            raise ValueError('More than one variable in dataset')
+            # Open the dataset from local with xarray
+            ds = xr.open_dataset(local_path, chunks=None)
 
-        if job.array['slice'] is not None:
-            data_array = data_array.isel(
-                {k: slice(*v) for k, v in job.array['slice'].items()},
-            )
+            # TODO: Add handling for when there is more than one variable
+            if len(ds.keys()) == 1:
+                data_array = next(v.squeeze() for v in ds.values())
+            else:
+                raise ValueError('More than one variable in dataset')
 
-        if ctx.obj['v']:
-            click.echo(f'Array has shape: {data_array.shape}')
-
-        pipelines = [
-            CodecPipeline(name=pipeline['name'], codec_configs=pipeline['steps'])
-            for pipeline in job.pipelines
-        ]
-
-        for chunk_shape in job.chunk_shapes:
-            dataset = BenchmarkInput(
-                name=job.array['name'],
-                array=data_array.values,
-                chunk_shape=tuple(chunk_shape) if chunk_shape else data_array.shape,
-            )
-
-            if ctx.obj['v']:
-                click.echo(
-                    f'Running benchmark comparison with chunk shape: {chunk_shape} ...',
+            if job.array['slice'] is not None:
+                data_array = data_array.isel(
+                    {k: slice(*v) for k, v in job.array['slice'].items()},
                 )
 
-            run_results = asyncio.run(
-                run_comparison(
-                    datasets=[dataset],
-                    pipelines=pipelines,
-                    iterations=job.iterations,
-                ),
-            )
+            if ctx.obj['v']:
+                click.echo(f'Array has shape: {data_array.shape}')
 
-            with output_file.open('a') as f:
+            pipelines = [
+                CodecPipeline(name=pipeline['name'], codec_configs=pipeline['steps'])
+                for pipeline in job.pipelines
+            ]
+
+            for chunk_shape in job.chunk_shapes:
+                dataset = BenchmarkInput(
+                    name=job.array['name'],
+                    array=data_array.values,
+                    chunk_shape=tuple(chunk_shape) if chunk_shape else data_array.shape,
+                )
+
+                if ctx.obj['v']:
+                    click.echo(
+                        f'Running comparison with chunk shape: {chunk_shape} ...',
+                    )
+
+                run_results = asyncio.run(
+                    run_comparison(
+                        datasets=[dataset],
+                        pipelines=pipelines,
+                        iterations=job.iterations,
+                    ),
+                )
+
                 for result in run_results.to_ndjson():
-                    f.write(result)
-                    f.write('\n')
+                    click.echo(result)
 
-            results.extend(run_results.to_dicts())
+                progress.update(task, advance=len(job.pipelines))
 
-    if not hide:
-        table = _create_table(results)
-
-        # Print the table
-        console = Console()
-        console.print(table)
+                results.extend(run_results.to_dicts())
 
 
 @cli.command()
-@click.argument(
-    'output_file',
-    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+@click.option(
+    '--input-file',
+    type=click.File('r'),
+    default=sys.stdin,
+    help='Input file or pipe from stdin.',
 )
-def show(output_file: Path) -> None:
-    """Show a table with all the outputs from a given file"""
-    with output_file.open('r') as f:
-        results = [json.loads(line) for line in f.readlines()]
+def render(input_file) -> None:
+    """Show a table with all the outputs"""
+    results = [json.loads(line) for line in input_file]
 
     table = _create_table(results)
 
