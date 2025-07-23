@@ -28,27 +28,31 @@ import json
 import subprocess
 from cog import out
 
-# Run the example.py script and capture its JSON output
+# Run the jobs defined in zarrzipan.yaml and capture the JSON output
 result = subprocess.run(
-    ["uv", "run", "python", "example.py"],
-    capture_output=True,
+    ["uv", "run", "zarrzipan", "compare"],
+    stdout=subprocess.PIPE,
     text=True,
     check=True
 )
 
 # Parse the JSON output
-data = json.loads(result.stdout)
+data = [json.loads(line) for line in result.stdout.split("\n")[:-1]]
 
 # Generate the Markdown table
 out('| Dataset Name | Pipeline Name | Chunk Shape | Iterations | Compression Ratio | Space Saving | Avg Compress Time (ms) | Avg Decompress Time (ms) | Lossiness (MAE) |\n')
-out('|---|---|---|---|---|---|---|---|---|\n')
+out('|---|---|---:|---:|---:|---:|---:|---:|---:|\n')
 for row in data:
     out(f"| {row['dataset_name']} | {row['pipeline_name']} | {row['chunk_shape']} | {row['iterations']} | {row['size_ratio']:.2f}x | {row['size_space_saving']:.2f} | {row['time_compress_avg_ms']:.2f} | {row['time_decompress_avg_ms']:.2f} | {row['lossiness_mae']:.4f} |\n")
  ]]]  -->
 | Dataset Name | Pipeline Name | Chunk Shape | Iterations | Compression Ratio | Space Saving | Avg Compress Time (ms) | Avg Decompress Time (ms) | Lossiness (MAE) |
-|---|---|---|---|---|---|---|---|---|
-| SampleFloat32Array | ZlibCompression | (50, 50) | 3 | 3.34x | 0.30 | 2.90 | 1.59 | 0.0000 |
-| SampleFloat32Array | BloscCompression | (50, 50) | 3 | 6.37x | 0.16 | 9.75 | 1.50 | 0.0000 |
+|---|---|---:|---:|---:|---:|---:|---:|---:|
+| Single band COG | Zlib level 5 | (1024, 1024) | 1 | 2.08x | 0.48 | 3650.76 | 382.46 | nan |
+| Single band COG | Blosc (defaults) | (1024, 1024) | 1 | 1.15x | 0.87 | 87.11 | 42.58 | nan |
+| Single band COG | Zlib level 5 | (2048, 2048) | 1 | 2.06x | 0.49 | 3832.48 | 426.79 | nan |
+| Single band COG | Blosc (defaults) | (2048, 2048) | 1 | 1.15x | 0.87 | 78.02 | 39.54 | nan |
+| Single band COG | Zlib level 5 | (4096, 4096) | 1 | 2.05x | 0.49 | 3871.48 | 417.26 | nan |
+| Single band COG | Blosc (defaults) | (4096, 4096) | 1 | 1.15x | 0.87 | 67.58 | 40.26 | nan |
 <!-- [[[end]]] (sum: zGaWTm9szN) -->
 
 ## What does "zarrzipan" mean?
