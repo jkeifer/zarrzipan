@@ -26,7 +26,6 @@ from zarrzipan.zarrzipan import run_comparison
 warnings.filterwarnings('ignore')
 
 DATA_DIR = Path('data')
-OUTPUT_DIR = Path('output')
 
 
 class ArrayDict(TypedDict):
@@ -170,15 +169,11 @@ def _create_table(results: list[dict[str, Any]]) -> Table:
 
 
 @click.group()
-@click.option('--verbose', '-v', is_flag=True, help='Print more output.')
-@click.pass_context
-def cli(ctx, verbose):
-    ctx.ensure_object(dict)
-    ctx.obj['v'] = verbose
+def cli():
+    pass
 
 
 @cli.command()
-@click.pass_context
 @click.option(
     '--config-file',
     '-f',
@@ -192,16 +187,13 @@ def cli(ctx, verbose):
     help=(f"Directory to cached data in. If not specified '{DATA_DIR}' will be used"),
     type=click.Path(file_okay=False, path_type=Path),
 )
-def run(
-    ctx,
+def compare(
     config_file: Path,
     data_dir: Path = DATA_DIR,
 ) -> None:
     """Run the jobs in the config file fetching data if needed"""
 
     config = Config.from_file(config_file)
-
-    results = []
 
     with Progress(console=Console(file=sys.stderr)) as progress:
         task = progress.add_task(
@@ -225,9 +217,6 @@ def run(
                     {k: slice(*v) for k, v in job.array['slice'].items()},
                 )
 
-            if ctx.obj['v']:
-                click.echo(f'Array has shape: {data_array.shape}')
-
             pipelines = [
                 CodecPipeline(name=pipeline['name'], codec_configs=pipeline['steps'])
                 for pipeline in job.pipelines
@@ -239,11 +228,6 @@ def run(
                     array=data_array.values,
                     chunk_shape=tuple(chunk_shape) if chunk_shape else data_array.shape,
                 )
-
-                if ctx.obj['v']:
-                    click.echo(
-                        f'Running comparison with chunk shape: {chunk_shape} ...',
-                    )
 
                 run_results = asyncio.run(
                     run_comparison(
@@ -257,8 +241,6 @@ def run(
                     click.echo(result)
 
                 progress.update(task, advance=len(job.pipelines))
-
-                results.extend(run_results.to_dicts())
 
 
 @cli.command()
