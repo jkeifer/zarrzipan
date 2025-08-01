@@ -36,6 +36,6 @@ jobs:
     chunk-shapes:
       - [1024, 1024]
       - [2048, 2048]
-      -
+      - null
     # number of times to run compression/decompression, default 1
     iterations: 1
