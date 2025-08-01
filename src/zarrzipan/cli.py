@@ -107,7 +107,7 @@ def _fetch_array(data_dir: Path, name: str, href: str) -> Path:
     filepath.parent.mkdir(parents=True, exist_ok=True)
 
     if not filepath.exists():
-        click.echo(f'Fetching {href}')
+        click.echo(f'Fetching {href}', err=True)
 
         store = HTTPStore(f'{parts.scheme}://{parts.netloc}')
         resp = obs.get(store, parts.path)
@@ -138,19 +138,19 @@ def _create_table(results: list[dict[str, Any]]) -> Table:
 
     # Helper function to format values
     def format_value(key, value):
-        if key == 'size_ratio':
-            color = 'cyan'
-            if value > mean_compression_ratio + 1:
-                color = 'green'
-            elif value < max(mean_compression_ratio - 1, 1):
-                color = 'red'
-            return Text(f'{value:.2f}x', style=color)
-        if key == 'lossiness_mae':
-            return f'{value:.4f}'
-        if key == 'chunk_shape':
-            return str(value).replace('[', '(').replace(']', ')')
-        if isinstance(value, float):
+        if isinstance(value, (float)):
+            if key == 'size_ratio':
+                color = 'cyan'
+                if value > mean_compression_ratio + 1:
+                    color = 'green'
+                elif value < max(mean_compression_ratio - 1, 1):
+                    color = 'red'
+                return Text(f'{value:.2f}x', style=color)
+            if key == 'lossiness_mae':
+                return f'{value:.4f}'
             return f'{value:.2f}'
+        if key == 'chunk_shape' and value:
+            return str(value).replace('[', '(').replace(']', ')')
         return str(value)
 
     # Create a rich table

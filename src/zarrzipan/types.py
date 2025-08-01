@@ -194,7 +194,7 @@ class BenchmarkResult:
 
         if self.lossiness_stats:
             for key, value in asdict(self.lossiness_stats).items():
-                flat_dict[f'lossiness_{key}'] = value
+                flat_dict[f'lossiness_{key}'] = value if not np.isnan(value) else None
         else:
             for key in asdict(BenchmarkLossiness(0, 0, 0)):
                 flat_dict[f'lossiness_{key}'] = None
