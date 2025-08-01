@@ -246,6 +246,7 @@ def compare(
 @cli.command()
 @click.option(
     '--input-file',
+    '-f',
     type=click.File('r'),
     default=sys.stdin,
     help='Input file or pipe from stdin.',
