@@ -67,6 +67,19 @@ for row in data:
 | Single band COG | Blosc (defaults) | (4096, 4096) | 1 | 1.15x | 0.87 | 65.32 | 42.13 | None |
 <!-- [[[end]]] (sum: FYssP979Y0) -->
 
+## Other tooling like this
+
+### geotiff-benchmark
+
+The [geotiff-benchmark](https://github.com/kokoalberti/geotiff-benchmark) tool
+is a gdal-based compression benchmarking solution targeting the GeoTIFF format
+specifically. While not know to us prior to the initial Zarrzipan development,
+geotiff-benchmark is similar in its goals, and allows testing a set of
+declaratively-configured GeoTIFF compression pipelines. [Read the corresponding
+blog
+post](https://kokoalberti.com/articles/geotiff-compression-optimization-guide/)
+to learn more about the tool.
+
 ## What does "zarrzipan" mean?
 
 Zarrzipan, pronounced like marzipan, is like "Zarr zip analysis", where zip is
