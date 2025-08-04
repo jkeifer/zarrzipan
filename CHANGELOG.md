@@ -19,6 +19,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+## [v0.1.0] - 2025-08-04
+
+### Added
+
+- Zarrzipan CLI, installable via the `cli` extra ([#1])
+
 ## [v0.0.2] - 2025-07-16
 
 ### Fixed
@@ -29,6 +35,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Initial release 🎉
 
-[unreleased]: https://github.com/jkeifer/zarrzipan/compare/v0.0.2...HEAD
-[v0.0.2]: https://github.com/jkeifer/zarrzipan/compare/v0.0.1...v0.0.1
+[unreleased]: https://github.com/jkeifer/zarrzipan/compare/v0.1.0...HEAD
+[v0.1.0]: https://github.com/jkeifer/zarrzipan/compare/v0.0.2...v0.1.0
+[v0.0.2]: https://github.com/jkeifer/zarrzipan/compare/v0.0.1...v0.0.2
 [v0.0.1]: https://github.com/jkeifer/zarrzipan/releases/tag/v0.0.1
+
+[#1]: https://github.com/jkeifer/zarrzipan/pull/1
