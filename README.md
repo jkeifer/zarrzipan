@@ -73,7 +73,7 @@ for row in data:
 
 The [geotiff-benchmark](https://github.com/kokoalberti/geotiff-benchmark) tool
 is a gdal-based compression benchmarking solution targeting the GeoTIFF format
-specifically. While not know to us prior to the initial Zarrzipan development,
+specifically. While not known to us prior to the initial Zarrzipan development,
 geotiff-benchmark is similar in its goals, and allows testing a set of
 declaratively-configured GeoTIFF compression pipelines. [Read the corresponding
 blog
